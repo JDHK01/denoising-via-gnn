@@ -20,7 +20,6 @@ NULLISH = {"", "--", "null", "none", "nan"}
 class AlertRecord:
     index: int
     platform_name: str | None
-    mdr_rule_classify: str | None
     event_name: str | None
     event_type: str | None
     start_time: str | None
@@ -99,7 +98,6 @@ def _parse_record(row: dict[str, Any], index: int) -> AlertRecord:
     return AlertRecord(
         index=index,
         platform_name=normalize_text(row.get("platform_name")),
-        mdr_rule_classify=normalize_text(row.get("mdr_rule_classify")),
         event_name=normalize_text(row.get("event_name")),
         event_type=normalize_text(row.get("event_type")),
         start_time=normalize_text(row.get("start_time")),
