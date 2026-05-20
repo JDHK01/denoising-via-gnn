@@ -393,7 +393,7 @@ def platform_scope(record: AlertRecord) -> str:
     return record.platform_name or "__missing_platform__"
 
 
-def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, hash_dim: int = 16, ip_info_tfidf: np.ndarray) -> np.ndarray:
+def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, ip_info_tfidf: np.ndarray) -> np.ndarray:
     key = (platform, ip)
     total = stats.ip_total[key]
     source = stats.ip_source[key]
@@ -409,7 +409,6 @@ def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, hash_dim: i
         log1p(len(stats.ip_events[key])),
         log1p(len(stats.ip_ports[key])),
         *port_features(tuple(stats.ip_ports[key])),
-        *stable_hash_vector(ip, hash_dim),
         *ip_info_tfidf,
     ]
     return np.asarray(features, dtype=np.float32)
