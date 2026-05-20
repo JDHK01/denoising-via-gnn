@@ -29,8 +29,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET_DIR = REPO_ROOT / "dataset" / "allin" / "data_final"
-DEFAULT_WORK_DIR = REPO_ROOT / "artifacts" / "allin" / "hgt_temporal"
+DEFAULT_DATASET_DIR = Path(__file__).resolve().parent / "dataset"
+DEFAULT_WORK_DIR = Path(__file__).resolve().parent / "artifacts"
 Root = tuple[NodeRef, int]
 
 
