@@ -9,10 +9,13 @@ from typing import Any, Iterator, Literal
 
 
 DatasetSplit = Literal["train", "test"]
+
+'''dict'''
 SPLIT_DIRS: dict[DatasetSplit, str] = {
     "train": "train_data",
     "test": "test_data",
 }
+
 NULLISH = {"", "--", "null", "none", "nan"}
 
 
@@ -31,9 +34,11 @@ class AlertRecord:
     q_body: str | None
     payload: str | None
     r_body: str | None
+
     label: int | None
 
     def to_dict(self) -> dict[str, Any]:
+        '''asdict: convert dataclass to dict'''
         return asdict(self)
 
 
@@ -44,6 +49,15 @@ def infer_label(op_state: int | None, rule_decide: str | None) -> int | None:
 
 
 def iter_dataset_files(dataset_dir: str | Path, split: DatasetSplit) -> Iterator[Path]:
+    '''
+    data/
+    ├── train_data/
+    │   ├── part_001.json
+    │   ├── part_002.json
+    │   └── part_003.json
+    └── test_data/
+        └── test_dataset.json
+    '''
     split_dir = Path(dataset_dir) / SPLIT_DIRS[split]
     yield from sorted(split_dir.glob("*.json"))
 

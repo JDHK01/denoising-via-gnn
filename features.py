@@ -15,6 +15,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from .data import AlertRecord
+from .ip_enrichment import IpEnrichment, IpInfo
 
 
 TEXT_FIELDS = (
@@ -259,7 +260,7 @@ def platform_scope(record: AlertRecord) -> str:
     return record.platform_name or "__missing_platform__"
 
 
-def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, hash_dim: int = 16) -> np.ndarray:
+def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, hash_dim: int = 16, ip_info_tfidf: np.ndarray) -> np.ndarray:
     key = (platform, ip)
     total = stats.ip_total[key]
     source = stats.ip_source[key]
@@ -276,6 +277,7 @@ def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, hash_dim: i
         log1p(len(stats.ip_ports[key])),
         *port_features(tuple(stats.ip_ports[key])),
         *stable_hash_vector(ip, hash_dim),
+        *ip_info_tfidf,
     ]
     return np.asarray(features, dtype=np.float32)
 
@@ -405,3 +407,127 @@ def stable_hash_vector(value: str | None, dim: int) -> list[float]:
 def stable_hash_int(value: str, modulo: int) -> int:
     digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big", signed=False) % modulo
+
+
+def ip_info_text(ip: str, ip_info_map: dict[str, IpInfo | None]) -> str:
+    """Convert IP info to text for TF-IDF processing."""
+    info = ip_info_map.get(ip)
+    if info is None:
+        return ""
+    parts = []
+    if info.as_name:
+        parts.append(f"asn:{info.as_name}")
+    if info.country:
+        parts.append(f"country:{info.country}")
+    return " ".join(parts)
+
+
+def collect_ips_from_records(records: Sequence[AlertRecord]) -> list[str]:
+    """Collect all unique IPs from records."""
+    ips = set()
+    for record in records:
+        ips.update(record.source_ip_list)
+        ips.update(record.destination_ip_list)
+    return sorted(ips)
+
+
+class IpInfoTfidfVectorizer:
+    """TF-IDF vectorizer for IP info (as_name and country)."""
+
+    def __init__(
+        self,
+        *,
+        max_features: int = 64,
+        min_df: int = 2,
+        max_df: float = 0.95,
+    ) -> None:
+        self.max_features = max_features
+        self.min_df = min_df
+        self.max_df = max_df
+        self._vectorizer: Any = None
+        self._ip_cache: dict[str, str] = {}
+
+    @property
+    def output_dim(self) -> int:
+        if self._vectorizer is None:
+            return self.max_features
+        return len(self._vectorizer.get_feature_names_out())
+
+    def fit(self, records: Sequence[AlertRecord], ip_info_map: dict[str, IpInfo | None]) -> "IpInfoTfidfVectorizer":
+        """Fit TF-IDF on IP info from training records."""
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        ips = collect_ips_from_records(records)
+
+        # Build cache and corpus
+        corpus = []
+        for ip in ips:
+            text = ip_info_text(ip, ip_info_map)
+            self._ip_cache[ip] = text
+            corpus.append(text)
+
+        # Handle empty corpus case
+        if not corpus or all(not t.strip() for t in corpus):
+            corpus = ["__empty_ip_info__"]
+
+        min_df = min(self.min_df, max(len(corpus), 1))
+        self._vectorizer = TfidfVectorizer(
+            max_features=self.max_features,
+            min_df=min_df,
+            max_df=self.max_df,
+            token_pattern=r"(?u)[^\s]+",
+        )
+        self._vectorizer.fit(corpus)
+        return self
+
+    def transform_ip(self, ip: str, ip_info_map: dict[str, IpInfo | None] | None = None) -> np.ndarray:
+        """Transform a single IP to TF-IDF vector."""
+        if self._vectorizer is None:
+            raise RuntimeError("IpInfoTfidfVectorizer is not fitted")
+
+        if ip in self._ip_cache:
+            text = self._ip_cache[ip]
+        elif ip_info_map is not None:
+            text = ip_info_text(ip, ip_info_map)
+        else:
+            text = ""
+
+        matrix = self._vectorizer.transform([text])
+        return matrix.toarray().astype(np.float32, copy=False)[0]
+
+    def transform(self, ips: Sequence[str], ip_info_map: dict[str, IpInfo | None] | None = None) -> np.ndarray:
+        """Transform multiple IPs to TF-IDF vectors."""
+        if self._vectorizer is None:
+            raise RuntimeError("IpInfoTfidfVectorizer is not fitted")
+
+        vectors = []
+        for ip in ips:
+            vectors.append(self.transform_ip(ip, ip_info_map))
+        return np.stack(vectors, axis=0)
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as handle:
+            pickle.dump(
+                {
+                    "config": {
+                        "max_features": self.max_features,
+                        "min_df": self.min_df,
+                        "max_df": self.max_df,
+                    },
+                    "vectorizer": self._vectorizer,
+                    "ip_cache": self._ip_cache,
+                },
+                handle,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "IpInfoTfidfVectorizer":
+        with Path(path).open("rb") as handle:
+            payload = pickle.load(handle)
+        obj = cls(**payload["config"])
+        obj._vectorizer = payload["vectorizer"]
+        obj._ip_cache = payload["ip_cache"]
+        return obj
