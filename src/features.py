@@ -377,14 +377,20 @@ class EventTfidfVectorizer:
 
 @dataclass
 class FeatureStats:
+    '''[str, str] is [platform. ip]'''
     ip_total: Counter[tuple[str, str]]
     ip_source: Counter[tuple[str, str]]
     ip_destination: Counter[tuple[str, str]]
+
     ip_events: dict[tuple[str, str], set[str]]
     ip_ports: dict[tuple[str, str], set[str]]
+
     source_destinations: dict[tuple[str, str], set[str]]
+
     destination_sources: dict[tuple[str, str], set[str]]
+
     event_count: Counter[tuple[str, str, str]]
+
     event_ips: dict[tuple[str, str, str], set[str]]
 
     @classmethod
@@ -400,6 +406,7 @@ class FeatureStats:
         event_ips: dict[tuple[str, str, str], set[str]] = defaultdict(set)
 
         for record in records:
+            # if no isolate_platform
             platform = platform_scope(record) if isolate_platform else "__global__"
             event_key = make_event_key(record) if isolate_platform else make_event_key(record, platform="__global__")
             event_text = "|".join(event_key[1:])
@@ -446,6 +453,26 @@ def make_event_key(record: AlertRecord, *, platform: str | None = None) -> tuple
 
 
 def alert_struct_features(record: AlertRecord, stats: FeatureStats, *, isolate_platform: bool = True) -> np.ndarray:
+    """
+    [
+        log1p(2),   # 1.099   num source IPs
+        log1p(1),   # 0.693   num destination IPs
+        log1p(2),   # 1.099   num source ports
+        log1p(2),   # 1.099   num destination ports
+        log1p(300), # 5.707   duration (seconds)
+        0.0,        # q_body not empty
+        1.0,        # payload is empty
+        0.0,        # r_body not empty
+        log1p(15),  # 2.773   max historical occurrences among src IPs
+        log1p(40),  # 3.714   max historical occurrences among dst IPs
+        log1p(3),   # 1.386   max fan-out among src IPs
+        log1p(3),   # 1.386   max fan-in among dst IPs
+        1.099, 0.0, 0.5, 0.0,  # source port features
+        1.099, 1.0, 0.0, 1.0,  # destination port features
+        1.0, 0.0, 0.0, 0.0,    # source IP type flags (all private)
+        1.0, 0.0, 0.0, 0.0,    # destination IP type flags (all private)
+    ]
+    """
     platform = platform_scope(record) if isolate_platform else "__global__"
     src_keys = [(platform, ip) for ip in record.source_ip_list]
     dst_keys = [(platform, ip) for ip in record.destination_ip_list]

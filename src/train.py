@@ -108,7 +108,6 @@ def train(args: argparse.Namespace) -> None:
         f"train_shape={alert_tfidf.shape} saved={vectorizer_path}"
     )
 
-    print("[2.5/6] fitting IP info TF-IDF on train records only")
     ips = collect_ips_from_records(records)
     with IpEnrichment() as enrich:
         ip_info_map = enrich.lookup_batch(ips)
@@ -125,7 +124,10 @@ def train(args: argparse.Namespace) -> None:
     event_tfidf_vec.fit(records)
     event_tfidf_path = args.work_dir / "event_tfidf_vectorizer.pkl"
     event_tfidf_vec.save(event_tfidf_path)
-    print(f"  event_tfidf output_dim={event_tfidf_vec.output_dim} saved={event_tfidf_path}")
+    print(
+        f"  event_tfidf fit_records={len(records)} "
+        f"output_dim={event_tfidf_vec.output_dim} saved={event_tfidf_path}"
+    )
 
     print(f"[3/6] building graph graph_learning={args.graph_learning}")
     graph = build_graph(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args)
