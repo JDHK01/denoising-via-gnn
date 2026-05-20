@@ -11,6 +11,7 @@ import numpy as np
 from .data import AlertRecord
 from .features import (
     FeatureStats,
+    IpInfoTfidfVectorizer,
     alert_struct_features,
     event_node_features,
     ip_node_features,
@@ -97,7 +98,8 @@ class AllInGraphBuilder:
     def __init__(self, config: GraphBuilderConfig | None = None) -> None:
         self.config = config or GraphBuilderConfig()
 
-    def build(self, records: Sequence[AlertRecord], alert_tfidf: np.ndarray | None = None) -> HeteroGraph:
+    # alert and ip use two different tfidf
+    def build(self, records: Sequence[AlertRecord], alert_tfidf: np.ndarray | None, ip_info_tfidf_vec: IpInfoTfidfVectorizer, ip_info_map: dict) -> HeteroGraph:
         stats = FeatureStats.from_records(records, isolate_platform=True)
         graph = HeteroGraph()
         alert_refs: list[NodeRef] = []
@@ -122,7 +124,7 @@ class AllInGraphBuilder:
                 graph.add_node(event_ref, event_node_features(event_ref.key, stats), {"event_key": event_ref.key})
             graph.add_bidirectional(alert_ref, "alert_has_event", event_ref)
 
-            source_refs = self._add_ip_role_edges(graph, record, stats, alert_ref, "source", record.source_ip_list)
+            source_refs = self._add_ip_role_edges(graph, record, stats, alert_ref, "source", record.source_ip_list, ip_info_tfidf_vec, ip_info_map)
             destination_refs = self._add_ip_role_edges(
                 graph,
                 record,
@@ -130,6 +132,8 @@ class AllInGraphBuilder:
                 alert_ref,
                 "destination",
                 record.destination_ip_list,
+                ip_info_tfidf_vec,
+                ip_info_map,
             )
             if self.config.add_src_dst_edges:
                 for src_ref in source_refs:
@@ -151,6 +155,8 @@ class AllInGraphBuilder:
         alert_ref: NodeRef,
         role: Literal["source", "destination"],
         ips: Sequence[str],
+        ip_info_tfidf_vec: IpInfoTfidfVectorizer,
+        ip_info_map: dict,
     ) -> list[NodeRef]:
         platform = record.platform_name or "__missing_platform__"
         refs: list[NodeRef] = []
@@ -158,7 +164,8 @@ class AllInGraphBuilder:
             ip_ref = NodeRef("ip", (platform, ip))
             refs.append(ip_ref)
             if ip_ref not in graph.nodes:
-                graph.add_node(ip_ref, ip_node_features(platform, ip, stats), {"ip": ip, "platform_name": platform})
+                ip_tfidf = ip_info_tfidf_vec.transform_ip(ip, ip_info_map)
+                graph.add_node(ip_ref, ip_node_features(platform, ip, stats, ip_info_tfidf=ip_tfidf), {"ip": ip, "platform_name": platform})
             graph.add_bidirectional(alert_ref, f"alert_has_{role}_ip", ip_ref)
         return refs
 
