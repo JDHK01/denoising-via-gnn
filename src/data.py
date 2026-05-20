@@ -7,13 +7,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
-
 DatasetSplit = Literal["train", "test"]
 
-'''dict'''
+'''dict, show how to splite "train" and "test"'''
 SPLIT_DIRS: dict[DatasetSplit, str] = {
-    "train": "train_data",
-    "test": "test_data",
+    "train": "train",
+    "test": "test",
 }
 
 NULLISH = {"", "--", "null", "none", "nan"}
@@ -22,6 +21,7 @@ NULLISH = {"", "--", "null", "none", "nan"}
 @dataclass(frozen=True, slots=True)
 class AlertRecord:
     index: int
+    
     platform_name: str | None
     event_name: str | None
     event_type: str | None
