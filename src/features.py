@@ -21,8 +21,8 @@ from ip_enrichment import IpEnrichment, IpInfo
 TEXT_FIELDS = (
     "event_name",
     "event_type",
-    "start_time",
-    "end_time",
+    # "start_time",
+    # "end_time",
     "q_body",
     "payload",
     "r_body",
