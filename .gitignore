@@ -1,3 +1,9 @@
 *.pyc
 
 scripts/
+
+.venv/
+
+dataset/
+
+resource/

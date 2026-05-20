@@ -8,9 +8,9 @@ from typing import Sequence
 import numpy as np
 import torch
 
-from .model import TensorHeteroGraph
+from model import TensorHeteroGraph
 
-from .graph import EdgeType, HeteroGraph, NodeRef
+from graph import EdgeType, HeteroGraph, NodeRef
 
 
 NODE_TYPES = ("alert", "ip", "event")

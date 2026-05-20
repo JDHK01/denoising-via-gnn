@@ -8,8 +8,8 @@ from typing import Literal, Sequence
 
 import numpy as np
 
-from .data import AlertRecord
-from .features import (
+from data import AlertRecord
+from features import (
     FeatureStats,
     IpInfoTfidfVectorizer,
     alert_struct_features,
