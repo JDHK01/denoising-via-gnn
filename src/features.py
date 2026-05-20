@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-import hashlib
 import ipaddress
 import math
 import pickle
+import re
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -285,6 +285,96 @@ class IpInfoTfidfVectorizer:
         return obj
 
 
+_HAS_CHINESE = re.compile(r"[一-鿿]")
+
+
+def preprocess_event_text(text: str, ngram_range: tuple[int, int] = (2, 4)) -> str:
+    """Split by spaces; tokens with Chinese chars are expanded to char n-grams."""
+    parts: list[str] = []
+    for token in text.split():
+        if _HAS_CHINESE.search(token):
+            for n in range(ngram_range[0], ngram_range[1] + 1):
+                parts.extend(token[i : i + n] for i in range(len(token) - n + 1))
+        else:
+            parts.append(token)
+    return " ".join(parts)
+
+
+class EventTfidfVectorizer:
+    """TF-IDF vectorizer for event (event_name + event_type) with Chinese-aware tokenization."""
+
+    def __init__(self, *, max_features: int = 64, min_df: int = 1, max_df: float = 1.0, ngram_range: tuple[int, int] = (2, 4)) -> None:
+        self.max_features = max_features
+        self.min_df = min_df
+        self.max_df = max_df
+        self.ngram_range = ngram_range
+        self._vectorizer: Any = None
+
+    @property
+    def output_dim(self) -> int:
+        if self._vectorizer is None:
+            return self.max_features
+        return len(self._vectorizer.get_feature_names_out())
+
+    def fit(self, records: Sequence[AlertRecord]) -> "EventTfidfVectorizer":
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        seen: set[tuple[str, str, str]] = set()
+        corpus: list[str] = []
+        for record in records:
+            key = make_event_key(record)
+            if key not in seen:
+                seen.add(key)
+                corpus.append(preprocess_event_text(" ".join(key[1:]), self.ngram_range))
+
+        if not corpus:
+            corpus = ["__empty_event__"]
+
+        self._vectorizer = TfidfVectorizer(
+            max_features=self.max_features,
+            min_df=self.min_df,
+            max_df=self.max_df,
+            token_pattern=r"(?u)[^\s]+",
+            sublinear_tf=True,
+            norm="l2",
+        )
+        self._vectorizer.fit(corpus)
+        return self
+
+    def transform_event(self, event_key: tuple[str, str, str]) -> np.ndarray:
+        if self._vectorizer is None:
+            raise RuntimeError("EventTfidfVectorizer is not fitted")
+        text = preprocess_event_text(" ".join(event_key[1:]), self.ngram_range)
+        matrix = self._vectorizer.transform([text])
+        return matrix.toarray().astype(np.float32, copy=False)[0]
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as handle:
+            pickle.dump(
+                {
+                    "config": {
+                        "max_features": self.max_features,
+                        "min_df": self.min_df,
+                        "max_df": self.max_df,
+                        "ngram_range": self.ngram_range,
+                    },
+                    "vectorizer": self._vectorizer,
+                },
+                handle,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "EventTfidfVectorizer":
+        with Path(path).open("rb") as handle:
+            payload = pickle.load(handle)
+        obj = cls(**payload["config"])
+        obj._vectorizer = payload["vectorizer"]
+        return obj
+
+
 @dataclass
 class FeatureStats:
     ip_total: Counter[tuple[str, str]]
@@ -414,12 +504,11 @@ def ip_node_features(platform: str, ip: str, stats: FeatureStats, *, ip_info_tfi
     return np.asarray(features, dtype=np.float32)
 
 
-def event_node_features(event_key: tuple[str, str, str], stats: FeatureStats) -> np.ndarray:
-    text = "|".join(event_key[1:])
+def event_node_features(event_key: tuple[str, str, str], stats: FeatureStats, *, event_tfidf: np.ndarray) -> np.ndarray:
     features = [
         log1p(stats.event_count[event_key]),
         log1p(len(stats.event_ips[event_key])),
-        *stable_hash_vector(text, 16),
+        *event_tfidf,
     ]
     return np.asarray(features, dtype=np.float32)
 
@@ -519,26 +608,6 @@ def timestamp_seconds(value: str | None) -> int | None:
 
 def log1p(value: int | float | None) -> float:
     return math.log1p(max(float(value or 0.0), 0.0))
-
-
-def stable_hash_vector(value: str | None, dim: int) -> list[float]:
-    if not value:
-        return [0.0] * dim
-    vector = [0.0] * dim
-    tokens = [value, *value.replace("_", " ").replace(".", " ").replace("-", " ").split()]
-    for token in tokens:
-        if not token:
-            continue
-        index = stable_hash_int(f"idx:{token}", dim)
-        sign = 1.0 if stable_hash_int(f"sign:{token}", 2) else -1.0
-        vector[index] += sign
-    norm = math.sqrt(sum(item * item for item in vector))
-    return [item / norm for item in vector] if norm else vector
-
-
-def stable_hash_int(value: str, modulo: int) -> int:
-    digest = hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest()
-    return int.from_bytes(digest, "big", signed=False) % modulo
 
 
 def ip_info_text(ip: str, ip_info_map: dict[str, IpInfo | None]) -> str:
