@@ -15,22 +15,22 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-from .data import AlertRecord, load_records
-from .features import AlertTfidfVectorizer, IpInfoTfidfVectorizer, collect_ips_from_records
-from .graph import AllInGraphBuilder, GraphBuilderConfig, NodeRef
-from .ip_enrichment import IpEnrichment
-from .metrics import binary_metrics, plot_pr_curve, write_json
-from .model import AllInModelConfig, HGTOnlyClassifier
-from .tensorize import NODE_TYPES, move_graph, to_tensor_graph
+from data import AlertRecord, load_records
+from features import AlertTfidfVectorizer, IpInfoTfidfVectorizer, collect_ips_from_records
+from graph import AllInGraphBuilder, GraphBuilderConfig, NodeRef
+from ip_enrichment import IpEnrichment
+from metrics import binary_metrics, plot_pr_curve, write_json
+from model import AllInModelConfig, HGTOnlyClassifier
+from tensorize import NODE_TYPES, move_graph, to_tensor_graph
 
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET_DIR = Path(__file__).resolve().parent / "dataset"
-DEFAULT_WORK_DIR = Path(__file__).resolve().parent / "artifacts"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATASET_DIR = Path(__file__).resolve().parents[1] / "dataset"
+DEFAULT_WORK_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 Root = tuple[NodeRef, int]
 
 
@@ -472,7 +472,7 @@ def set_seed(seed: int) -> None:
 
 def save_command_script(output_dir: Path, name: str) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    command = " ".join(shell_quote(part) for part in [sys.executable, "-m", "allin.train", *sys.argv[1:]])
+    command = " ".join(shell_quote(part) for part in [sys.executable, "-m", "train", *sys.argv[1:]])
     (output_dir / name).write_text(command + "\n", encoding="utf-8")
 
 

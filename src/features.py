@@ -14,8 +14,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .data import AlertRecord
-from .ip_enrichment import IpEnrichment, IpInfo
+from data import AlertRecord
+from ip_enrichment import IpEnrichment, IpInfo
 
 
 TEXT_FIELDS = (
