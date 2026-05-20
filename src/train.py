@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 
 from data import AlertRecord, load_records
-from features import AlertTfidfVectorizer, IpInfoTfidfVectorizer, collect_ips_from_records
+from features import AlertTfidfVectorizer, EventTfidfVectorizer, IpInfoTfidfVectorizer, collect_ips_from_records
 from graph import AllInGraphBuilder, GraphBuilderConfig, NodeRef
 from ip_enrichment import IpEnrichment
 from metrics import binary_metrics, plot_pr_curve, write_json
@@ -121,8 +121,14 @@ def train(args: argparse.Namespace) -> None:
         f"output_dim={ip_info_tfidf_vec.output_dim} saved={ip_info_tfidf_path}"
     )
 
+    event_tfidf_vec = EventTfidfVectorizer()
+    event_tfidf_vec.fit(records)
+    event_tfidf_path = args.work_dir / "event_tfidf_vectorizer.pkl"
+    event_tfidf_vec.save(event_tfidf_path)
+    print(f"  event_tfidf output_dim={event_tfidf_vec.output_dim} saved={event_tfidf_path}")
+
     print(f"[3/6] building graph graph_learning={args.graph_learning}")
-    graph = build_graph(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, args)
+    graph = build_graph(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args)
     print(f"  graph nodes={len(graph.nodes)} edges={len(graph.edges)} edge_types={len(graph.edge_types())}")
 
     print("[4/6] tensorizing graph")
@@ -206,9 +212,11 @@ def evaluate(args: argparse.Namespace) -> None:
     vectorizer = AlertTfidfVectorizer.load(vectorizer_path)
     ip_info_tfidf_path = Path(train_args.get("work_dir", args.work_dir)) / "ip_info_tfidf_vectorizer.pkl"
     ip_info_tfidf_vec = IpInfoTfidfVectorizer.load(ip_info_tfidf_path)
+    event_tfidf_path = Path(train_args.get("work_dir", args.work_dir)) / "event_tfidf_vectorizer.pkl"
+    event_tfidf_vec = EventTfidfVectorizer.load(event_tfidf_path)
     if args.threshold is None:
         args.threshold = float(ckpt.get("best_threshold", 0.5))
-    print(f"  vectorizer={vectorizer_path} ip_info_tfidf={ip_info_tfidf_path} threshold={args.threshold:.4f}")
+    print(f"  vectorizer={vectorizer_path} ip_info_tfidf={ip_info_tfidf_path} event_tfidf={event_tfidf_path} threshold={args.threshold:.4f}")
 
     print(f"[2/5] loading records split={args.split} max_records={args.max_records}")
     records = load_records(args.dataset_dir, args.split, max_records=args.max_records)
@@ -222,7 +230,7 @@ def evaluate(args: argparse.Namespace) -> None:
     print(f"  alert_tfidf shape={alert_tfidf.shape}")
 
     print(f"[4/5] building/tensorizing graph graph_learning={args.graph_learning}")
-    graph = build_graph(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, args)
+    graph = build_graph(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args)
     tensorized = to_tensor_graph(graph, alert_tfidf=alert_tfidf, input_dims=ckpt["model_config"]["input_dims"])
     roots = labeled_roots(records, tensorized)
     print(f"  graph nodes={len(graph.nodes)} edges={len(graph.edges)} labeled_roots={len(roots)}")
@@ -255,7 +263,7 @@ def evaluate(args: argparse.Namespace) -> None:
 
 
 # if_info is added, needs two dependences, ip_info_tdidf & ip_info_map
-def build_graph(records: list[AlertRecord], alert_tfidf, ip_info_tfidf_vec, ip_info_map, args: argparse.Namespace):
+def build_graph(records: list[AlertRecord], alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args: argparse.Namespace):
     return AllInGraphBuilder(
         GraphBuilderConfig(
             graph_learning=args.graph_learning,
@@ -266,7 +274,7 @@ def build_graph(records: list[AlertRecord], alert_tfidf, ip_info_tfidf_vec, ip_i
             similarity_min_score=args.similarity_min_score,
             add_src_dst_edges=not args.no_src_dst_edges,
         )
-    ).build(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map)
+    ).build(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec)
 
 
 def train_step(

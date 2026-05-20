@@ -10,6 +10,7 @@ import numpy as np
 
 from data import AlertRecord
 from features import (
+    EventTfidfVectorizer,
     FeatureStats,
     IpInfoTfidfVectorizer,
     alert_struct_features,
@@ -99,7 +100,7 @@ class AllInGraphBuilder:
         self.config = config or GraphBuilderConfig()
 
     # alert and ip use two different tfidf
-    def build(self, records: Sequence[AlertRecord], alert_tfidf: np.ndarray | None, ip_info_tfidf_vec: IpInfoTfidfVectorizer, ip_info_map: dict) -> HeteroGraph:
+    def build(self, records: Sequence[AlertRecord], alert_tfidf: np.ndarray | None, ip_info_tfidf_vec: IpInfoTfidfVectorizer, ip_info_map: dict, event_tfidf_vec: EventTfidfVectorizer) -> HeteroGraph:
         stats = FeatureStats.from_records(records, isolate_platform=True)
         graph = HeteroGraph()
         alert_refs: list[NodeRef] = []
@@ -121,7 +122,7 @@ class AllInGraphBuilder:
 
             event_ref = NodeRef("event", make_event_key(record))
             if event_ref not in graph.nodes:
-                graph.add_node(event_ref, event_node_features(event_ref.key, stats), {"event_key": event_ref.key})
+                graph.add_node(event_ref, event_node_features(event_ref.key, stats, event_tfidf=event_tfidf_vec.transform_event(event_ref.key)), {"event_key": event_ref.key})
             graph.add_bidirectional(alert_ref, "alert_has_event", event_ref)
 
             source_refs = self._add_ip_role_edges(graph, record, stats, alert_ref, "source", record.source_ip_list, ip_info_tfidf_vec, ip_info_map)
