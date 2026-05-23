@@ -33,9 +33,7 @@ class HGTModelConfig:
     hidden_dim: int = 256
     num_heads: int = 4
     dropout: float = 0.1
-    pre_hgt_layers: int = 3
     hgt_layers: int = 2
-    prune_threshold: float = 0.5
 
 
 def _edge_type_key(edge_type: EdgeType) -> str:
@@ -62,8 +60,6 @@ def _edge_softmax(score: torch.Tensor, dst_idx: torch.Tensor) -> torch.Tensor:
 
 
 class HGTLayer(nn.Module):
-    """Small HGT layer without torch-geometric dependency."""
-
     def __init__(self, config: HGTModelConfig) -> None:
         super().__init__()
         if config.hidden_dim % config.num_heads != 0:
@@ -184,7 +180,6 @@ class HGTOnlyClassifier(nn.Module):
             hidden_dim=config.hidden_dim,
             num_heads=config.num_heads,
             dropout=config.dropout,
-            pre_hgt_layers=0,
             hgt_layers=config.hgt_layers,
         )
         self.input_proj = nn.ModuleDict(
