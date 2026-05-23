@@ -22,6 +22,7 @@ from features import (
 
 
 NodeType = Literal["alert", "ip", "event"]
+# tuple of three elements, no predefined
 EdgeType = tuple[str, str, str]
 
 
@@ -51,9 +52,10 @@ class Edge:
 
     @property
     def edge_type(self) -> EdgeType:
+        ''' return EdgeType: tuple[str, str, str] '''
         return (self.src.node_type, self.relation, self.dst.node_type)
 
-
+# in this class, type of edge is not exactly
 @dataclass
 class HeteroGraph:
     nodes: dict[NodeRef, Node] = field(default_factory=dict)
@@ -70,6 +72,7 @@ class HeteroGraph:
         key = (src, relation, dst)
         if key in self._edge_keys:
             return
+        
         self._edge_keys.add(key)
         self.edges.append(Edge(src=src, relation=relation, dst=dst, weight=float(weight)))
 
@@ -87,19 +90,23 @@ class HeteroGraph:
 @dataclass
 class GraphBuilderConfig:
     graph_learning: Literal["none", "temporal", "similarity", "both"] = "temporal"
+
+    # only see previous node, but bidirectional, no problem
     temporal_window_seconds: int = 3600
-    temporal_prev: int = 2
-    similarity_candidate_window: int = 8
-    similarity_topk: int = 2
-    similarity_min_score: float = 0.05
+    temporal_prev: int = 10
+
+    similarity_candidate_window: int = 10 # a problem, the choose principle is depended on data in original dataset, add time logic later
+    similarity_topk: int = 5
+    similarity_min_score: float = 0.5
+    
     add_src_dst_edges: bool = True
 
 
-class AllInGraphBuilder:
+class GraphBuilder:
     def __init__(self, config: GraphBuilderConfig | None = None) -> None:
         self.config = config or GraphBuilderConfig()
 
-    # alert and ip use two different tfidf
+    # alert and ip use two different tfidf corpus
     def build(self, records: Sequence[AlertRecord], alert_tfidf: np.ndarray | None, ip_info_tfidf_vec: IpInfoTfidfVectorizer, ip_info_map: dict, event_tfidf_vec: EventTfidfVectorizer) -> HeteroGraph:
         stats = FeatureStats.from_records(records, isolate_platform=True)
         graph = HeteroGraph()

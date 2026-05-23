@@ -17,7 +17,7 @@ import torch.nn.functional as F
 
 from data import AlertRecord, load_records
 from features import AlertTfidfVectorizer, EventTfidfVectorizer, IpInfoTfidfVectorizer, collect_ips_from_records
-from graph import AllInGraphBuilder, GraphBuilderConfig, NodeRef
+from graph import GraphBuilder, GraphBuilderConfig, NodeRef
 from ip_enrichment import IpEnrichment
 from metrics import binary_metrics, plot_pr_curve, write_json
 from model import AllInModelConfig, HGTOnlyClassifier
@@ -266,7 +266,7 @@ def evaluate(args: argparse.Namespace) -> None:
 
 # if_info is added, needs two dependences, ip_info_tdidf & ip_info_map
 def build_graph(records: list[AlertRecord], alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args: argparse.Namespace):
-    return AllInGraphBuilder(
+    return GraphBuilder(
         GraphBuilderConfig(
             graph_learning=args.graph_learning,
             temporal_window_seconds=args.temporal_window_seconds,
