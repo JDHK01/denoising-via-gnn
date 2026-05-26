@@ -7,11 +7,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
-DatasetSplit = Literal["train", "test"]
+DatasetSplit = Literal["train", "value", "test"]
 
-'''dict, show how to splite "train" and "test"'''
+'''dict, show how to splite "train", "value" and "test"'''
 SPLIT_DIRS: dict[DatasetSplit, str] = {
     "train": "train",
+    "value": "value",
     "test": "test",
 }
 

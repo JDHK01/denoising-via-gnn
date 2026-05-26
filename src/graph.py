@@ -211,16 +211,17 @@ class GraphBuilder:
         alert_refs: Sequence[NodeRef],
         alert_tfidf: np.ndarray | None,
     ) -> None:
-        buckets: dict[tuple[str, str, str], list[tuple[int, NodeRef]]] = defaultdict(list)
+        buckets: dict[tuple[str, str, str], list[tuple[int, int, NodeRef]]] = defaultdict(list)
         for record, ref in zip(records, alert_refs, strict=True):
-            buckets[make_event_key(record)].append((record.index, ref))
+            ts = timestamp_seconds(record.start_time) or 0
+            buckets[make_event_key(record)].append((ts, record.index, ref))
 
         for rows in buckets.values():
-            rows.sort(key=lambda item: item[0])
-            for pos, (record_index, ref) in enumerate(rows):
+            rows.sort(key=lambda item: item[0])  # 按时间排序，而非数据顺序
+            for pos, (ts, record_index, ref) in enumerate(rows):
                 candidates = rows[max(0, pos - self.config.similarity_candidate_window) : pos]
                 scored: list[tuple[float, NodeRef]] = []
-                for candidate_index, candidate_ref in candidates:
+                for candidate_ts, candidate_index, candidate_ref in candidates:
                     score = self._similarity(records[record_index], records[candidate_index], alert_tfidf)
                     if score >= self.config.similarity_min_score:
                         scored.append((score, candidate_ref))

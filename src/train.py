@@ -41,7 +41,6 @@ def parse_args() -> argparse.Namespace:
     train = sub.add_parser("train")
     add_common_args(train)
     train.add_argument("--split", choices=("train",), default="train")
-    train.add_argument("--val-ratio", type=float, default=0.2)
     train.add_argument("--epochs", type=int, default=8)
     train.add_argument("--lr", type=float, default=1e-3)
     train.add_argument("--weight-decay", type=float, default=1e-4)
@@ -50,7 +49,7 @@ def parse_args() -> argparse.Namespace:
 
     evaluate = sub.add_parser("eval")
     add_common_args(evaluate)
-    evaluate.add_argument("--split", choices=("test", "train"), default="test")
+    evaluate.add_argument("--split", choices=("test", "train", "value"), default="test")
     evaluate.add_argument("--checkpoint", type=Path, default=None)
     evaluate.add_argument("--threshold", type=float, default=None)
     return parser.parse_args()
@@ -86,69 +85,87 @@ def train(args: argparse.Namespace) -> None:
     args.work_dir.mkdir(parents=True, exist_ok=True)
     save_command_script(args.work_dir, "command_train.sh")
 
-    print(f"[1/6] loading records dataset={args.dataset_dir} split=train max_records={args.max_records}")
-    records = load_records(args.dataset_dir, "train", max_records=args.max_records)
-    summarize_records(records, args.work_dir / "train_dataset_summary.json")
-    print_summary(records)
-    if not records:
+    print(f"[1/7] loading train records dataset={args.dataset_dir} max_records={args.max_records}")
+    train_records = load_records(args.dataset_dir, "train", max_records=args.max_records)
+    summarize_records(train_records, args.work_dir / "train_dataset_summary.json")
+    print_summary(train_records)
+    if not train_records:
         raise RuntimeError("no training records loaded")
 
-    print("[2/6] fitting TF-IDF on train records only")
+    print("[2/7] loading value records")
+    val_records = load_records(args.dataset_dir, "value", max_records=args.max_records)
+    summarize_records(val_records, args.work_dir / "value_dataset_summary.json")
+    print_summary(val_records)
+    if not val_records:
+        raise RuntimeError("no validation records loaded")
+
+    print("[3/7] fitting TF-IDF on train records only")
     vectorizer = AlertTfidfVectorizer(
         max_features=args.tfidf_max_features,
         min_df=args.tfidf_min_df,
         ngram_range=(1, args.tfidf_ngram_max),
     )
-    vectorizer.fit(records)
-    alert_tfidf = vectorizer.transform(records)
+    vectorizer.fit(train_records)
+    train_tfidf = vectorizer.transform(train_records)
+    val_tfidf = vectorizer.transform(val_records)
     vectorizer_path = args.work_dir / "tfidf_vectorizer.pkl"
     vectorizer.save(vectorizer_path)
     print(
-        f"  alert_tfidf fit_records={len(records)} "
-        f"train_shape={alert_tfidf.shape} saved={vectorizer_path}"
+        f"  alert_tfidf fit_records={len(train_records)} "
+        f"train_shape={train_tfidf.shape} val_shape={val_tfidf.shape} saved={vectorizer_path}"
     )
 
-    ips = collect_ips_from_records(records)
+    train_ips = collect_ips_from_records(train_records)
+    val_ips = collect_ips_from_records(val_records)
+    all_ips = list(set(train_ips) | set(val_ips))
     with IpEnrichment() as enrich:
-        ip_info_map = enrich.lookup_batch(ips)
+        ip_info_map = enrich.lookup_batch(all_ips)
     ip_info_tfidf_vec = IpInfoTfidfVectorizer()
-    ip_info_tfidf_vec.fit(records, ip_info_map)
+    ip_info_tfidf_vec.fit(train_records, ip_info_map)
     ip_info_tfidf_path = args.work_dir / "ip_info_tfidf_vectorizer.pkl"
     ip_info_tfidf_vec.save(ip_info_tfidf_path)
     print(
-        f"  ip_info_tfidf fit_records={len(records)} "
+        f"  ip_info_tfidf fit_records={len(train_records)} "
         f"output_dim={ip_info_tfidf_vec.output_dim} saved={ip_info_tfidf_path}"
     )
 
     event_tfidf_vec = EventTfidfVectorizer()
-    event_tfidf_vec.fit(records)
+    event_tfidf_vec.fit(train_records)
     event_tfidf_path = args.work_dir / "event_tfidf_vectorizer.pkl"
     event_tfidf_vec.save(event_tfidf_path)
     print(
-        f"  event_tfidf fit_records={len(records)} "
+        f"  event_tfidf fit_records={len(train_records)} "
         f"output_dim={event_tfidf_vec.output_dim} saved={event_tfidf_path}"
     )
 
-    print(f"[3/6] building graph graph_learning={args.graph_learning}")
-    graph = build_graph(records, alert_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args)
-    print(f"  graph nodes={len(graph.nodes)} edges={len(graph.edges)} edge_types={len(graph.edge_types())}")
+    print(f"[4/7] building train graph graph_learning={args.graph_learning}")
+    train_graph = build_graph(train_records, train_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args)
+    print(f"  train graph nodes={len(train_graph.nodes)} edges={len(train_graph.edges)} edge_types={len(train_graph.edge_types())}")
 
-    print("[4/6] tensorizing graph")
-    tensorized = to_tensor_graph(graph, alert_tfidf=alert_tfidf)
-    roots = labeled_roots(records, tensorized)
-    if not roots:
+    print("[5/7] building value graph")
+    val_graph = build_graph(val_records, val_tfidf, ip_info_tfidf_vec, ip_info_map, event_tfidf_vec, args)
+    print(f"  val graph nodes={len(val_graph.nodes)} edges={len(val_graph.edges)} edge_types={len(val_graph.edge_types())}")
+
+    print("[6/7] tensorizing graphs")
+    train_tensorized = to_tensor_graph(train_graph, alert_tfidf=train_tfidf)
+    val_tensorized = to_tensor_graph(val_graph, alert_tfidf=val_tfidf, input_dims=train_tensorized.input_dims)
+    train_roots = labeled_roots(train_records, train_tensorized)
+    val_roots = labeled_roots(val_records, val_tensorized)
+    if not train_roots:
         raise RuntimeError("no labeled training roots found")
-    train_roots, val_roots = split_roots(roots, val_ratio=args.val_ratio, seed=args.seed)
-    print(f"  roots labeled={len(roots)} train={len(train_roots)} val={len(val_roots)}")
-    print(f"  input_dims={tensorized.input_dims}")
-    print(f"  edge_types={tensorized.edge_types}")
+    if not val_roots:
+        raise RuntimeError("no labeled validation roots found")
+    print(f"  train_roots={len(train_roots)} val_roots={len(val_roots)}")
+    print(f"  input_dims={train_tensorized.input_dims}")
+    print(f"  train_edge_types={train_tensorized.edge_types}")
 
     device = torch.device(args.device)
-    tensor_graph = move_graph(tensorized.graph, device)
+    train_tensor_graph = move_graph(train_tensorized.graph, device)
+    val_tensor_graph = move_graph(val_tensorized.graph, device)
     config = AllInModelConfig(
         node_types=NODE_TYPES,
-        edge_types=tensorized.edge_types,
-        input_dims=tensorized.input_dims,
+        edge_types=train_tensorized.edge_types,
+        input_dims=train_tensorized.input_dims,
         hidden_dim=args.hidden_dim,
         num_heads=args.num_heads,
         hgt_layers=args.hgt_layers,
@@ -164,7 +181,7 @@ def train(args: argparse.Namespace) -> None:
     amp_dtype = resolve_amp_dtype(args.amp_dtype)
 
     print(
-        f"[5/6] training epochs={args.epochs} device={device} pos={positive} neg={negative} "
+        f"[7/7] training epochs={args.epochs} device={device} pos={positive} neg={negative} "
         f"pos_weight={float(pos_weight.item()):.3f}"
     )
     best_score = float("-inf")
@@ -172,17 +189,17 @@ def train(args: argparse.Namespace) -> None:
     for epoch in range(1, args.epochs + 1):
         epoch_started = time.perf_counter()
         random.Random(args.seed + epoch).shuffle(train_roots)
-        train_loss, train_scores = train_step(model, tensor_graph, train_roots, optimizer, pos_weight, args, amp_dtype)
+        train_loss, train_scores = train_step(model, train_tensor_graph, train_roots, optimizer, pos_weight, args, amp_dtype)
         train_metrics = binary_metrics([label for _root, label in train_roots], train_scores)
-        val_loss, val_scores = evaluate_roots(model, tensor_graph, val_roots, pos_weight, args, amp_dtype)
+        val_loss, val_scores = evaluate_roots(model, val_tensor_graph, val_roots, pos_weight, args, amp_dtype)
         val_labels = [label for _root, label in val_roots]
         val_threshold, val_f1 = best_f1_threshold(val_labels, val_scores)
-        val_metrics = binary_metrics(val_labels, val_scores, threshold=val_threshold if val_roots else 0.5)
+        val_metrics = binary_metrics(val_labels, val_scores, threshold=val_threshold)
         val_metrics["loss"] = val_loss
         val_metrics["best_threshold"] = val_threshold
         val_metrics["best_threshold_f1"] = val_f1
         train_metrics["loss"] = train_loss
-        score = float(val_metrics.get(args.best_metric, 0.0) if val_roots else train_metrics.get(args.best_metric, 0.0))
+        score = float(val_metrics.get(args.best_metric, 0.0))
         print(
             f"  epoch={epoch} train_loss={train_loss:.4f} train_ap={train_metrics['pr_auc']:.4f} "
             f"val_loss={val_loss:.4f} val_ap={val_metrics.get('pr_auc', 0.0):.4f} "
@@ -198,7 +215,7 @@ def train(args: argparse.Namespace) -> None:
 
     write_json(args.work_dir / "metrics.json", best_payload)
     write_json(args.work_dir / "train_args.json", jsonable_args(args))
-    print(f"[6/6] done elapsed={time.perf_counter() - started:.1f}s best_{args.best_metric}={best_score:.4f}")
+    print(f"done elapsed={time.perf_counter() - started:.1f}s best_{args.best_metric}={best_score:.4f}")
     print(f"checkpoint={args.work_dir / 'hgt_best.pt'}")
 
 
@@ -334,29 +351,6 @@ def labeled_roots(records: list[AlertRecord], tensorized) -> list[Root]:
         if ref in tensorized.node_index:
             roots.append((tensorized.local_index(ref), int(record.label)))
     return roots
-
-
-def split_roots(roots: list[Root], *, val_ratio: float, seed: int) -> tuple[list[Root], list[Root]]:
-    rng = random.Random(seed)
-    positives = [root for root in roots if root[1] == 1]
-    negatives = [root for root in roots if root[1] == 0]
-    rng.shuffle(positives)
-    rng.shuffle(negatives)
-
-    def split_class(items: list[Root]) -> tuple[list[Root], list[Root]]:
-        if len(items) < 2 or val_ratio <= 0:
-            return items, []
-        val_count = max(1, int(round(len(items) * val_ratio)))
-        val_count = min(val_count, len(items) - 1)
-        return items[val_count:], items[:val_count]
-
-    train_pos, val_pos = split_class(positives)
-    train_neg, val_neg = split_class(negatives)
-    train = [*train_pos, *train_neg]
-    val = [*val_pos, *val_neg]
-    rng.shuffle(train)
-    rng.shuffle(val)
-    return train, val
 
 
 def best_f1_threshold(labels: list[int], scores: list[float]) -> tuple[float, float]:
